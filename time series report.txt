@@ -1,0 +1,145 @@
+﻿# Time Series Analysis of UK Mail Order Retail Sales
+
+## Dataset
+
+**Series:** RSI: Retail Sale via Mail Order Houses (Vol NSA): All Business Index
+**Source:** Office for National Statistics (ONS), ONS Time Series Explorer
+**Series ID:** EAQP
+**URL:** https://www.ons.gov.uk/businessindustryandtrade/retailindustry/timeseries/eaqp/drsi
+**Coverage:** 456 monthly observations, January 1988 – December 2025 (manually trimmed to monthly observations only)
+
+This series measures UK retail sales volume through mail order and online platforms, not seasonally adjusted (NSA), which is why any seasonal effect is still visible in the raw data.
+
+### Introduction
+
+In this report I analyse monthly UK retail sales via mail order houses. My aim is to examine whether the series shows seasonality and to explain why this matters for forecasting and decision-making. Retail sales through mail order and online platforms are expected to show seasonal behaviour because consumer spending increases and decreases at certain times of the year for example, it increases during the Christmas period.
+
+### Code: Loading and Plotting the Series
+
+```python
+"""
+Created on Tue Feb 17 23:04:36 2026
+
+@author: BOSOLA
+"""
+# Import libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Read the CSV file into a pandas DataFrame
+data = pd.read_csv('retaildata1.csv')
+
+# Convert the relevant columns to NumPy arrays
+# (pandas is used only to load the file and convert to numpy, as required)
+month = pd.Series(data['Month']).to_numpy()
+values = pd.Series(
+    data['RSI:Retail sale via mail order houses (vol nsa):All Business Index']
+).to_numpy()
+
+# Plot the retail sales index using matplotlib directly
+plt.figure(figsize=(11, 5))
+plt.plot(month, values, color='steelblue', linewidth=1)
+plt.title('UK Mail Order Retail Sales Index, Jan 1988 – Dec 2025 (Vol, NSA)')
+plt.xlabel('Year')
+plt.ylabel('Retail Sales Index (Volume, NSA)')
+plt.xticks(month[::24], rotation=45)  
+plt.tight_layout()
+plt.savefig('figure1_time_series.png', dpi=150)
+plt.show()
+```
+Time Series Plot
+
+
+**Figure 1:** Monthly mail order retail sales index, 1988–2025.
+
+Figure 1 shows clear seasonality. Sales rise every November and December for Christmas shopping, and fall in January. This repeating pattern every 12 months is seasonality (Chatfield, 2004). The chart also shows long-term growth from around 2010 as online shopping increased, a COVID-19 driven spike in 2020–2021, and a return to trend from 2022 onwards.
+
+### Understanding Seasonality
+
+Seasonality refers to patterns that recur within a specific period of time. In monthly data, annual seasonality repeats every 12 months (Hyndman & Athanasopoulos, 2021). The seasonal effect is still visible here because the data is not seasonally adjusted (NSA). If strong annual seasonality is present, we would expect to see significant autocorrelation at lag 12 in the autocorrelation function (ACF).
+
+## Concept 1: Autocorrelation
+
+Autocorrelation measures how much a time series is related to its own past values (Box et al., 2015). At lag 1, it checks whether this month's value predicts next month's. At lag 12, it checks whether this month predicts the same month next year. A value close to +1 means a strong link; a value close to 0 means no link. A simple way to think about it: if a shop is busy this month, is it also likely to be busy next month?
+
+### Code: Autocorrelation
+
+```python
+# Autocorrelation
+max_lag = 60
+autocorr_values = []
+
+for lag in range(1, max_lag + 1):
+    corr = np.corrcoef(values[:-lag], values[lag:])[0, 1]
+    autocorr_values.append(corr)
+
+plt.figure(figsize=(10, 5))
+plt.bar(range(1, max_lag + 1), autocorr_values, color='teal')
+plt.title('Autocorrelation of Retail Sales, Lags 1–60 Months')
+plt.xlabel('Lag (Months)')
+plt.ylabel('Correlation')
+plt.axhline(0, color='black', linewidth=0.8)
+plt.tight_layout()
+plt.savefig('figure2_acf.png', dpi=150)
+plt.show()
+```
+
+**Figure 2:** Autocorrelation Function (ACF), lags 1–60 months.
+
+
+Most bars sit above 0.9. Lag 1 = 0.98, meaning this month strongly predicts the next month. Lag 12 = 0.97, confirming the seasonal Christmas pattern repeats almost every year. Lag 24 = 0.93, showing the same pattern is still present two years back. This is a continuous, recurring pattern rather than a one-off coincidence. For a decision maker, this means past data is highly reliable for short-term forecasting (Hyndman & Athanasopoulos, 2021) — but it also means naive forecasts that ignore the 12-month cycle (e.g. simply extrapolating last month's value) will systematically miss seasonal peaks and troughs.
+
+## Concept 2: Exponential Smoothing
+
+Exponential smoothing is a forecasting method that reduces random fluctuation in a time series by giving more weight to recent observations, making it easier to produce stable, forward-looking predictions. The formula is:
+
+**New forecast = α × (actual this month) + (1 − α) × (previous forecast)**
+
+Alpha (α = 0.3) controls how reactive the model is: a small α reacts slowly and smooths heavily, while a large α reacts quickly to recent changes. With α = 0.3, 30% of the weight goes to the latest observed value and 70% carries forward from the running smoothed history (Hyndman & Athanasopoulos, 2021).
+
+### Code: Simple Exponential Smoothing
+
+```python
+# Exponential smoothing
+alpha = 0.3
+ses = np.zeros(len(values))
+ses[0] = values[0]
+
+for i in range(1, len(values)):
+    ses[i] = alpha * values[i] + (1 - alpha) * ses[i - 1]
+
+# Root Mean Squared Error between the smoothed series and the actual values
+rmse = np.sqrt(np.mean((values - ses) ** 2))
+print(f'RMSE = {rmse:.1f}')
+
+plt.figure(figsize=(11, 5))
+plt.plot(month, values, label='Original Data', color='gray', alpha=0.6)
+plt.plot(month, ses, label=f'Exponential Smoothing (alpha = {alpha})', color='darkorange')
+plt.title('Simple Exponential Smoothing of Retail Sales')
+plt.xlabel('Month')
+plt.ylabel('Retail Sales Index')
+plt.xticks(month[::24], rotation=45)
+plt.legend()
+plt.tight_layout()
+plt.savefig('figure3_ses.png', dpi=150)
+plt.show()
+```
+
+**Figure 3:** SES (α = 0.3) vs actual monthly sales. RMSE = 8.0 index points
+
+
+The orange line in Figure 3 follows the overall trend but does not jump with every seasonal spike, smoothing out noise and making the underlying direction clearer. The smoothed series confirms that, although there is strong monthly variation, the upward trend and repeating seasonal pattern remain clear underneath it. The RMSE reported by the code above shows, on average, how many index points the smoothed forecast deviates from the actual value. During the COVID-19 pandemic the model lagged noticeably, because α = 0.3 is a cautious setting that responds slowly to sudden shocks. A higher α would react faster in a crisis, at the cost of being less stable during quieter periods (Gardner, 2006).
+
+## References
+
+Box, G.E.P., Jenkins, G.M., Reinsel, G.C. and Ljung, G.M. (2015) *Time Series Analysis: Forecasting and Control*. 5th edn. Hoboken: Wiley.
+
+Chatfield, C. (2004) *The Analysis of Time Series: An Introduction*. 6th edn. Boca Raton: Chapman & Hall/CRC.
+
+Gardner, E.S. (2006) 'Exponential smoothing: The state of the art—Part II', *International Journal of Forecasting*, 22(4), pp. 637–666.
+
+Hyndman, R.J. and Athanasopoulos, G. (2021) *Forecasting: Principles and Practice*. 3rd edn. Melbourne: OTexts.
+
+Office for National Statistics (2026) *RSI: Retail Sale via Mail Order Houses (Vol NSA): All Business Index*, series EAQP. Available at: https://www.ons.gov.uk/businessindustryandtrade/retailindustry/timeseries/eaqp/drsi (Accessed: [insert your access date]).
+
